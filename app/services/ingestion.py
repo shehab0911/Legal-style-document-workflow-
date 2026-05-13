@@ -35,6 +35,44 @@ _DATE_PATTERNS = [
     r"\b\d{4}-\d{2}-\d{2}\b",
 ]
 _MONEY_PATTERN = r"\$[\d,]+(?:\.\d{2})?"
+_NOTICE_LINE = re.compile(
+    r"\b(notice|notifies|notification|terminate|termination|pursuant|default|demand|cure)\b",
+    re.I,
+)
+
+
+def _extract_title_heading_candidates(text: str) -> list[str]:
+    out: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or len(s) > 160:
+            continue
+        if s.isupper() and len(s) > 8:
+            out.append(s[:160])
+            continue
+        if re.match(r"^(ARTICLE|SECTION|\d+\.)\s", s, re.I):
+            out.append(s[:160])
+            continue
+        if len(s) < 90 and re.search(
+            r"\b(copyright|journal|agreement|manuscript|abstract|license|editor)\b",
+            s,
+            re.I,
+        ):
+            out.append(s[:160])
+    return list(dict.fromkeys(out))[:40]
+
+
+def _extract_notice_snippets(text: str) -> list[str]:
+    hits: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or len(s) > 500:
+            continue
+        if _NOTICE_LINE.search(s):
+            hits.append(s[:500])
+    return hits[:30]
+
+
 _PARTY_KEYWORDS = (
     "plaintiff",
     "defendant",
@@ -114,7 +152,19 @@ def extract_structured_fields(full_text: str) -> StructuredCaseFields:
         money_amounts=_extract_money(full_text),
         section_headings=_section_headings(full_text),
         confidence_notes=notes,
+        title_or_heading_candidates=_extract_title_heading_candidates(full_text),
+        notice_related_snippets=_extract_notice_snippets(full_text),
     )
+
+
+def _prepare_image_for_ocr(img: Image.Image) -> Image.Image:
+    """Light contrast/sharpen pass to help noisy scans before Tesseract."""
+    from PIL import ImageEnhance
+
+    gray = img.convert("L")
+    gray = ImageEnhance.Contrast(gray).enhance(1.25)
+    gray = ImageEnhance.Sharpness(gray).enhance(1.12)
+    return gray
 
 
 def _ocr_image(pil_image: Image.Image) -> str:
@@ -137,6 +187,13 @@ def ingest_pdf_bytes(data: bytes, filename: str = "upload.pdf") -> IngestResult:
     except Exception as e:  # noqa: BLE001
         raise ValueError(f"Could not open PDF: {e}") from e
 
+    npages = len(doc)
+    if npages > settings.max_pdf_pages:
+        doc.close()
+        raise ValueError(
+            f"PDF has {npages} pages; maximum allowed is {settings.max_pdf_pages}.",
+        )
+
     try:
         for i in range(len(doc)):
             page = doc.load_page(i)
@@ -146,6 +203,7 @@ def ingest_pdf_bytes(data: bytes, filename: str = "upload.pdf") -> IngestResult:
             if len(text) < settings.ocr_char_threshold:
                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
                 img = Image.open(io.BytesIO(pix.tobytes("png")))
+                img = _prepare_image_for_ocr(img)
                 ocr_text = _ocr_image(img)
                 if ocr_text.strip():
                     text = ocr_text.strip()

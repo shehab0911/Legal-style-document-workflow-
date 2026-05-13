@@ -4,6 +4,10 @@ uvicorn[standard]==0.32.1
 python-multipart==0.0.17
 pydantic==2.10.3
 pydantic-settings==2.6.1
+typing_extensions>=4.12.2
+
+# PyTorch 2.2 + sentence-transformers: NumPy 2.x breaks embedding (.numpy() / ABI); keep 1.x.
+numpy>=1.26.4,<2.0.0
 
 # Documents
 pymupdf==1.24.14
@@ -22,10 +26,12 @@ rank-bm25==0.2.2
 sqlmodel==0.0.22
 aiosqlite==0.20.0
 
-# Optional LLM-backed drafting
-openai==1.57.4
+# LLM-backed drafting (Gemini REST client)
 httpx==0.28.1
 
 # Dev / tests
 pytest==8.3.4
 pytest-asyncio==0.24.0
+
+# Sample PDF script only (lightweight; avoids requiring PyMuPDF for scripts/build_sample_pdf.py)
+fpdf2==2.8.2

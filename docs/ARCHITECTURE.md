@@ -20,13 +20,22 @@
 
 6. **Draft generation (`app/services/generation.py`)**  
    - **Default (no API key):** extractive bullets tied to `[E#]` citations—each bullet is sourced from a single retrieved span.  
-   - **Optional OpenAI:** evidence-bound prompt with mandatory inline citations; falls back to extractive mode on errors.
+   - **Optional Gemini (Google AI):** evidence-bound prompt with mandatory inline citations via the `generateContent` API; falls back to extractive mode on errors or empty responses.
 
 7. **Edit learning (`app/services/edit_learning.py` + retrieval preferences)**  
    `difflib.SequenceMatcher` extracts replace/insert/delete fragments with local context. Each meaningful change is stored in SQLite and as a natural-language “preference” document in Chroma so future retrievals for the same `document_id` can surface **operator-specific wording** without claiming new facts.
 
 8. **API + UI (`app/main.py`, `app/static/index.html`)**  
    FastAPI exposes ingest, draft, and feedback endpoints; the root path serves a minimal HTML operator console.
+
+9. **Production middleware (`app/middleware/production.py`)**  
+   Request IDs, access logging, baseline security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`), and optional per-IP rate limiting.
+
+10. **Operational endpoints**  
+    `GET /health` for liveness; `GET /ready` for dependency checks (database query + data directory writable).
+
+11. **Optional API key (`app/deps.py`)**  
+    When `LEGAL_WORKFLOW_API_KEY` is set, mutating and document-scoped read routes require `X-API-Key` or `Bearer` token (Swagger “Authorize” compatible for Bearer).
 
 ## Data flow
 

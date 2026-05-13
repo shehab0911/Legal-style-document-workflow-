@@ -1,0 +1,7 @@
+{
+  "document_id": "<from upload>",
+  "task": "title_review_summary",
+  "draft_markdown_excerpt": "## Title review summary\n\n- RESIDENTIAL LEASE AGREEMENT [E1]\n- This Lease is entered into as of March 12, 2024 between Lessor ABC Properties LLC [E2]",
+  "structured_fields_note": "Upload JSON also includes title_or_heading_candidates for downstream routing.",
+  "note": "Grounded bullets must cite [E#] matching evidence in the full API response."
+}

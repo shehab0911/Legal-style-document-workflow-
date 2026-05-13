@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import difflib
 import re
 import uuid
 from typing import Any
+
+import httpx
 
 from app.config import settings
 from app.models.schemas import (
@@ -45,11 +48,24 @@ def _build_evidence_ids(chunks: list[tuple[str, str, int | None, float]]) -> tup
     return spans, id_map
 
 
+_NOTICE_RX = re.compile(
+    r"\b(notice|notifies|notification|terminate|termination|pursuant|thereof|"
+    r"default|demand|cure\s+period|within\s+\d+|days?\s+after)\b",
+    re.I,
+)
+_TITLEISH_RX = re.compile(
+    r"\b(copyright|journal|agreement|author|title|abstract|manuscript|license|editor)\b",
+    re.I,
+)
+
+
 def _task_query(task: DraftTaskType, user_query: str | None) -> str:
     base = {
         DraftTaskType.CASE_FACT_SUMMARY: "Key parties obligations timeline amounts events risks stated in the document",
         DraftTaskType.DOCUMENT_CHECKLIST: "Required exhibits signatures deadlines filings mentioned in the document",
         DraftTaskType.INTERNAL_MEMO: "Internal summary issues open questions next steps based on the document",
+        DraftTaskType.TITLE_REVIEW_SUMMARY: "Document title parties venue publication identifiers headings from the document",
+        DraftTaskType.NOTICE_RELATED_SUMMARY: "Notice cure default termination deadlines demands and related obligations in the document",
     }[task]
     if user_query:
         return f"{base}. Focus: {user_query}"
@@ -108,6 +124,41 @@ def draft_extractive_case_summary(
         )
         return "\n".join(lines), citations
 
+    if task == DraftTaskType.TITLE_REVIEW_SUMMARY:
+        lines.append("## Title review summary")
+        lines.append("")
+        lines.append("Each bullet is grounded in a single evidence span (titles, parties, publication cues).")
+        lines.append("")
+        citations = []
+        ranked = sorted(
+            evidence_spans,
+            key=lambda e: (0 if _TITLEISH_RX.search(e.full_chunk_text) else 1, -(len(e.excerpt))),
+        )
+        for ev in ranked[:10]:
+            sents = _split_sentences(ev.full_chunk_text)
+            pick = sents[0] if sents else _compress_quote(ev.full_chunk_text, 320)
+            if len(pick) < 12:
+                pick = _compress_quote(ev.full_chunk_text, 320)
+            row = f"- {_compress_quote(pick, 420)} [{ev.evidence_id}]"
+            lines.append(row)
+            citations.append(CitationRecord(draft_span=row, evidence_ids=[ev.evidence_id]))
+        return "\n".join(lines), citations
+
+    if task == DraftTaskType.NOTICE_RELATED_SUMMARY:
+        lines.append("## Notice-related summary (from cited evidence)")
+        lines.append("")
+        notice_first = [e for e in evidence_spans if _NOTICE_RX.search(e.full_chunk_text)]
+        pool = notice_first if len(notice_first) >= 2 else evidence_spans
+        citations = []
+        for ev in pool[:10]:
+            sents = _split_sentences(ev.full_chunk_text)
+            hit = [s for s in sents if _NOTICE_RX.search(s)]
+            text = hit[0] if hit else (sents[0] if sents else _compress_quote(ev.full_chunk_text, 280))
+            row = f"- {_compress_quote(text, 420)} [{ev.evidence_id}]"
+            lines.append(row)
+            citations.append(CitationRecord(draft_span=row, evidence_ids=[ev.evidence_id]))
+        return "\n".join(lines), citations
+
     # CASE_FACT_SUMMARY (default)
     lines.append("## Case / matter fact summary")
     lines.append("")
@@ -127,7 +178,34 @@ def draft_extractive_case_summary(
     return "\n".join(lines), citations
 
 
-async def draft_with_optional_openai(
+_GEMINI_GENERATE_TMPL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+)
+
+
+def _text_from_gemini_response(data: dict[str, Any]) -> str:
+    candidates = data.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return ""
+    first = candidates[0]
+    if not isinstance(first, dict):
+        return ""
+    content = first.get("content")
+    if not isinstance(content, dict):
+        return ""
+    parts = content.get("parts")
+    if not isinstance(parts, list):
+        return ""
+    out: list[str] = []
+    for p in parts:
+        if isinstance(p, dict):
+            t = p.get("text")
+            if t:
+                out.append(str(t))
+    return "".join(out)
+
+
+async def draft_with_optional_gemini(
     chunks: list[tuple[str, str, int | None, float]],
     task: DraftTaskType,
     preference_hints: list[str],
@@ -135,27 +213,25 @@ async def draft_with_optional_openai(
     evidence_spans, _ = _build_evidence_ids(chunks)
     used_llm = False
 
-    if not settings.openai_api_key:
+    if not settings.google_api_key:
         md, cites = draft_extractive_case_summary(chunks, task, preference_hints)
         return md, cites, evidence_spans, used_llm
 
-    try:
-        from openai import AsyncOpenAI
+    evidence_block = "\n\n".join(
+        f"[{e.evidence_id}] (page {e.page_index + 1 if e.page_index is not None else '?'}): {e.full_chunk_text}"
+        for e in evidence_spans
+    )
+    pref = "\n".join(preference_hints) if preference_hints else "(none)"
 
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
-        evidence_block = "\n\n".join(
-            f"[{e.evidence_id}] (page {e.page_index + 1 if e.page_index is not None else '?'}): {e.full_chunk_text}"
-            for e in evidence_spans
-        )
-        pref = "\n".join(preference_hints) if preference_hints else "(none)"
+    task_instr = {
+        DraftTaskType.CASE_FACT_SUMMARY: "Produce a case fact summary as bullet points.",
+        DraftTaskType.DOCUMENT_CHECKLIST: "Produce a checklist of concrete action items implied by the document.",
+        DraftTaskType.INTERNAL_MEMO: "Produce a short internal memo with Facts / Issues / Next steps.",
+        DraftTaskType.TITLE_REVIEW_SUMMARY: "Produce a title review summary: document identity, parties, venue or publication, and key headings—bullet points only.",
+        DraftTaskType.NOTICE_RELATED_SUMMARY: "Produce a notice-focused summary: deadlines, cure/default language, termination, and demands—bullet points only.",
+    }[task]
 
-        task_instr = {
-            DraftTaskType.CASE_FACT_SUMMARY: "Produce a case fact summary as bullet points.",
-            DraftTaskType.DOCUMENT_CHECKLIST: "Produce a checklist of concrete action items implied by the document.",
-            DraftTaskType.INTERNAL_MEMO: "Produce a short internal memo with Facts / Issues / Next steps.",
-        }[task]
-
-        prompt = f"""You are drafting inside a law firm workflow. Use ONLY the evidence blocks below.
+    prompt = f"""You are drafting inside a law firm workflow. Use ONLY the evidence blocks below.
 Rules:
 - Every factual sentence MUST end with one or more bracketed citations like [E1] or [E1][E2].
 - Do not invent parties, dates, amounts, or obligations not clearly supported.
@@ -171,14 +247,39 @@ EVIDENCE:
 {task_instr}
 Return markdown."""
 
-        resp = await client.chat.completions.create(
-            model=settings.openai_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-        )
-        content = resp.choices[0].message.content or ""
-        used_llm = True
+    url = _GEMINI_GENERATE_TMPL.format(model=settings.gemini_model)
+    payload: dict[str, Any] = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.2},
+    }
 
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+            content = ""
+            retries = max(1, settings.gemini_max_retries)
+            for attempt in range(retries):
+                try:
+                    resp = await client.post(
+                        url,
+                        params={"key": settings.google_api_key},
+                        json=payload,
+                    )
+                except (httpx.TimeoutException, httpx.TransportError):
+                    if attempt + 1 >= retries:
+                        raise
+                    await asyncio.sleep(min(10.0, 1.5**attempt))
+                    continue
+                if resp.status_code in (429, 503) and attempt + 1 < retries:
+                    await asyncio.sleep(min(30.0, 2.0**attempt))
+                    continue
+                resp.raise_for_status()
+                content = _text_from_gemini_response(resp.json())
+                break
+        if not content.strip():
+            md, cites = draft_extractive_case_summary(chunks, task, preference_hints)
+            return md, cites, evidence_spans, used_llm
+
+        used_llm = True
         cites: list[CitationRecord] = []
         for line in content.splitlines():
             found = re.findall(r"\[E\d+\]", line)
@@ -194,22 +295,45 @@ Return markdown."""
 
 
 def summarize_diff(system_draft: str, operator_final: str) -> dict[str, Any]:
+    """
+    Human-readable diff summary. Omits tiny opcode fragments so samples stay readable
+    when drafts differ a lot (SequenceMatcher otherwise surfaces single-character chunks).
+    """
     sm = difflib.SequenceMatcher(a=system_draft, b=operator_final)
     ops = sm.get_opcodes()
     replacements: list[dict[str, str]] = []
     for tag, i1, i2, j1, j2 in ops:
         if tag == "replace":
-            replacements.append(
-                {
-                    "before": system_draft[i1:i2].strip(),
-                    "after": operator_final[j1:j2].strip(),
-                }
-            )
+            bef = system_draft[i1:i2].strip()
+            aft = operator_final[j1:j2].strip()
+            if len(bef) < 8 and len(aft) < 8:
+                continue
+            replacements.append({"before": bef, "after": aft})
         elif tag == "delete":
-            replacements.append({"before": system_draft[i1:i2].strip(), "after": ""})
+            bef = system_draft[i1:i2].strip()
+            if len(bef) < 12:
+                continue
+            replacements.append({"before": bef, "after": ""})
         elif tag == "insert":
-            replacements.append({"before": "", "after": operator_final[j1:j2].strip()})
-    return {"replacement_count": len(replacements), "samples": replacements[:25]}
+            aft = operator_final[j1:j2].strip()
+            if len(aft) < 12:
+                continue
+            replacements.append({"before": "", "after": aft})
+
+    note: str | None = None
+    la, lb = len(system_draft), len(operator_final)
+    if la > 200 and lb > 200 and max(la, lb) / max(min(la, lb), 1) > 2.5:
+        note = (
+            "System and operator drafts differ greatly in length; "
+            "samples only list substantive edits (very small fragments are omitted)."
+        )
+    if not replacements and system_draft.strip() != operator_final.strip():
+        note = (
+            (note + " " if note else "")
+            + "No substantive diff segments after filtering; likely a full rewrite rather than local edits."
+        ).strip()
+
+    return {"replacement_count": len(replacements), "samples": replacements[:25], "note": note}
 
 
 def extract_learned_snippets(

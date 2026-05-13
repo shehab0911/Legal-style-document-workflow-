@@ -1,0 +1,2 @@
+# Keep Docker images small: use CPU wheels from PyTorch instead of CUDA stacks.
+torch==2.2.2+cpu

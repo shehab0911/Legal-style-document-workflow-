@@ -5,7 +5,10 @@ services:
       - "8000:8000"
     environment:
       - LEGAL_WORKFLOW_DATA_DIR=/data
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - LEGAL_WORKFLOW_ENVIRONMENT=${LEGAL_WORKFLOW_ENVIRONMENT:-development}
+      - LEGAL_WORKFLOW_API_KEY=${LEGAL_WORKFLOW_API_KEY:-}
+      - LEGAL_WORKFLOW_RATE_LIMIT_REQUESTS_PER_MINUTE=${LEGAL_WORKFLOW_RATE_LIMIT_REQUESTS_PER_MINUTE:-120}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
     volumes:
       - legal_workflow_data:/data
     restart: unless-stopped

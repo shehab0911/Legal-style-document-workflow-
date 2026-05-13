@@ -18,8 +18,17 @@
 | Storage | SQLite + local Chroma | Simple ops for assessment/demo; production at scale would likely use Postgres + managed vector store + object storage for originals. |
 | Learning | Snippet + vector memory | Lightweight improvement loop without full model fine-tuning; not a substitute for curated playbooks. |
 
+## Production-oriented controls
+
+- **Environment:** `LEGAL_WORKFLOW_ENVIRONMENT=production` suppresses internal exception text in HTTP 500 responses.
+- **Authentication:** optional shared secret via `LEGAL_WORKFLOW_API_KEY` (header-based); not a full IAM story—pair with network policy or OAuth gateway for real deployments.
+- **Rate limiting:** in-process per-IP window; stateless replicas need a shared store (Redis) for global limits.
+- **Health:** Docker `HEALTHCHECK` hits `/health`; orchestrators should also use `/ready` before receiving traffic.
+- **Scaling:** single-node SQLite + local Chroma suffice for demos; production scale implies Postgres/object storage + managed embeddings/vector service and async ingestion workers.
+
 ## Known limitations
 
 - Very large PDF corpora are not sharded; ingestion is synchronous in the request.  
 - Chroma metadata uses integer `page_index` (-1 sentinel when unknown in older paths); UI should treat unknown pages gracefully.  
 - First embedding model download is heavy; pin versions in `requirements.txt` for reproducibility.
+- **Handwriting / very poor scans:** Tesseract-only; specialized HTR APIs are an extension point.

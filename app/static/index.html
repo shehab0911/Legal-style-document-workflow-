@@ -18,6 +18,12 @@
   <p>Upload a PDF, generate a grounded draft with inspectable evidence IDs, then submit operator edits to improve future drafts.</p>
 
   <section>
+    <h2>0. Optional API key</h2>
+    <p>If the server has <code>LEGAL_WORKFLOW_API_KEY</code> set, paste the same value here (sent as <code>X-API-Key</code>).</p>
+    <input type="password" id="apiKey" style="width:100%" placeholder="Leave blank for local dev without API key" autocomplete="off" />
+  </section>
+
+  <section>
     <h2>1. Upload PDF</h2>
     <input type="file" id="pdf" accept="application/pdf" />
     <button type="button" id="btnUpload">Upload</button>
@@ -27,10 +33,12 @@
   <section>
     <h2>2. Generate draft</h2>
     <label>Document ID</label>
-    <input type="text" id="docId" style="width:100%" placeholder="Returned from upload" />
+    <input type="text" id="docId" style="width:100%" placeholder="Paste document_id from step 1 (UUID — not a filename)" />
     <label>Task</label>
     <select id="task">
       <option value="case_fact_summary">Case fact summary</option>
+      <option value="title_review_summary">Title review summary</option>
+      <option value="notice_related_summary">Notice-related summary</option>
       <option value="document_checklist">Document checklist</option>
       <option value="internal_memo">Internal memo</option>
     </select>
@@ -51,15 +59,25 @@
     <pre id="editOut"></pre>
   </section>
 
-  <p><a href="/docs">OpenAPI docs</a></p>
+  <p><a href="/docs">DOCS</a></p>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const api = (path, opts) => fetch(path, opts).then(async (r) => {
-      const t = await r.text();
-      try { return { ok: r.ok, json: JSON.parse(t), raw: t }; } catch { return { ok: r.ok, json: null, raw: t }; }
-    });
-
+    const authHeaders = () => {
+      const k = $("apiKey").value.trim();
+      return k ? { "X-API-Key": k } : {};
+    };
+    const api = (path, opts = {}) => {
+      const headers = { ...(opts.headers || {}), ...authHeaders() };
+      return fetch(path, { ...opts, headers }).then(async (r) => {
+        const t = await r.text();
+        try {
+          return { ok: r.ok, json: JSON.parse(t), raw: t };
+        } catch {
+          return { ok: r.ok, json: null, raw: t };
+        }
+      });
+    };
     $("btnUpload").onclick = async () => {
       const f = $("pdf").files[0];
       if (!f) { alert("Choose a PDF"); return; }

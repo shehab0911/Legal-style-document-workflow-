@@ -1,5 +1,7 @@
 from pathlib import Path
-from typing import Self
+from typing import Literal
+
+from typing_extensions import Self
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -11,6 +13,16 @@ class Settings(BaseSettings):
     data_dir: Path = Path("./data")
     chroma_subdir: str = "chroma"
     sqlite_filename: str = "workflow.db"
+
+    # deployment
+    environment: Literal["development", "production"] = "development"
+    log_level: str = "INFO"
+    """When set, POST/GET data routes require X-API-Key or Authorization: Bearer."""
+    api_key: str | None = None
+    max_upload_bytes: int = 40 * 1024 * 1024
+    max_pdf_pages: int = 500
+    """0 disables in-process per-IP sliding window limit."""
+    rate_limit_requests_per_minute: int = 120
 
     # Embedding model (local, sentence-transformers)
     embedding_model: str = "all-MiniLM-L6-v2"
@@ -27,17 +39,26 @@ class Settings(BaseSettings):
     retrieval_top_k_bm25: int = 20
     retrieval_fusion_top_n: int = 12
 
-    # Optional OpenAI for higher-quality drafts (still evidence-bound)
-    openai_api_key: str | None = None
-    openai_model: str = "gpt-4o-mini"
+    # Optional Gemini (Google AI Studio API key) for higher-quality drafts (still evidence-bound)
+    google_api_key: str | None = None
+    gemini_model: str = "gemini-2.0-flash"
+    gemini_max_retries: int = 4
 
     @model_validator(mode="after")
-    def _openai_from_std_env(self) -> Self:
+    def _google_api_key_from_env(self) -> Self:
         import os
 
-        if self.openai_api_key is None and os.environ.get("OPENAI_API_KEY"):
-            object.__setattr__(self, "openai_api_key", os.environ["OPENAI_API_KEY"])
+        if self.google_api_key is None:
+            for key in ("GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_AI_API_KEY"):
+                val = os.environ.get(key)
+                if val:
+                    object.__setattr__(self, "google_api_key", val)
+                    break
         return self
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
 
     @property
     def sqlite_path(self) -> Path:

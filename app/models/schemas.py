@@ -9,6 +9,8 @@ class DraftTaskType(str, Enum):
     CASE_FACT_SUMMARY = "case_fact_summary"
     DOCUMENT_CHECKLIST = "document_checklist"
     INTERNAL_MEMO = "internal_memo"
+    TITLE_REVIEW_SUMMARY = "title_review_summary"
+    NOTICE_RELATED_SUMMARY = "notice_related_summary"
 
 
 class PageBlock(BaseModel):
@@ -27,6 +29,14 @@ class StructuredCaseFields(BaseModel):
     money_amounts: list[str] = Field(default_factory=list)
     section_headings: list[str] = Field(default_factory=list)
     confidence_notes: list[str] = Field(default_factory=list)
+    title_or_heading_candidates: list[str] = Field(
+        default_factory=list,
+        description="Short lines likely to be titles, headings, or document identifiers.",
+    )
+    notice_related_snippets: list[str] = Field(
+        default_factory=list,
+        description="Lines touching notice / termination / default / cure language.",
+    )
 
 
 class DocumentIngestResponse(BaseModel):
