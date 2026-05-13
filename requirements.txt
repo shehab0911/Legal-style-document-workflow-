@@ -1,0 +1,31 @@
+# Core API
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.17
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Documents
+pymupdf==1.24.14
+pypdf==5.1.0
+pillow==10.4.0
+
+# OCR (optional at runtime; install Tesseract on host for full OCR)
+pytesseract==0.3.13
+
+# Retrieval
+chromadb==0.5.23
+sentence-transformers==3.3.1
+rank-bm25==0.2.2
+
+# Storage
+sqlmodel==0.0.22
+aiosqlite==0.20.0
+
+# Optional LLM-backed drafting
+openai==1.57.4
+httpx==0.28.1
+
+# Dev / tests
+pytest==8.3.4
+pytest-asyncio==0.24.0

@@ -1,0 +1,14 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - LEGAL_WORKFLOW_DATA_DIR=/data
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      - legal_workflow_data:/data
+    restart: unless-stopped
+
+volumes:
+  legal_workflow_data:

@@ -1,0 +1,14 @@
+{
+  "document_id": "<fill after upload>",
+  "task": "case_fact_summary",
+  "draft_markdown_excerpt": "- Monthly rent shall be $1,850.00 due on the first of each month... [E1]",
+  "evidence": [
+    {
+      "evidence_id": "E1",
+      "chunk_id": "<uuid>",
+      "page_index": 0,
+      "excerpt": "Monthly rent shall be $1,850.00 due on the first..."
+    }
+  ],
+  "note": "Run the API against samples/input/synthetic_lease.pdf and paste a real response here for reviewers."
+}

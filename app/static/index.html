@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Legal Workflow — Demo UI</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; max-width: 960px; margin: 0 auto; padding: 1rem; }
+    textarea { width: 100%; min-height: 140px; font-family: ui-monospace, monospace; font-size: 13px; }
+    pre { background: #f4f4f5; padding: 1rem; overflow: auto; white-space: pre-wrap; }
+    button { padding: 0.5rem 1rem; cursor: pointer; }
+    label { display: block; margin-top: 0.75rem; font-weight: 600; }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+  </style>
+</head>
+<body>
+  <h1>Legal workflow (assessment build)</h1>
+  <p>Upload a PDF, generate a grounded draft with inspectable evidence IDs, then submit operator edits to improve future drafts.</p>
+
+  <section>
+    <h2>1. Upload PDF</h2>
+    <input type="file" id="pdf" accept="application/pdf" />
+    <button type="button" id="btnUpload">Upload</button>
+    <pre id="uploadOut"></pre>
+  </section>
+
+  <section>
+    <h2>2. Generate draft</h2>
+    <label>Document ID</label>
+    <input type="text" id="docId" style="width:100%" placeholder="Returned from upload" />
+    <label>Task</label>
+    <select id="task">
+      <option value="case_fact_summary">Case fact summary</option>
+      <option value="document_checklist">Document checklist</option>
+      <option value="internal_memo">Internal memo</option>
+    </select>
+    <label>Optional retrieval focus</label>
+    <input type="text" id="query" style="width:100%" placeholder="e.g. payment terms" />
+    <button type="button" id="btnDraft">Generate</button>
+    <pre id="draftOut"></pre>
+  </section>
+
+  <section>
+    <h2>3. Operator edit feedback</h2>
+    <p>Paste the system draft, edit it to your preferred final, then submit. The system stores diffs and preference snippets for this document.</p>
+    <label>System draft (markdown)</label>
+    <textarea id="sysDraft"></textarea>
+    <label>Your final (markdown)</label>
+    <textarea id="opFinal"></textarea>
+    <button type="button" id="btnEdit">Submit edits</button>
+    <pre id="editOut"></pre>
+  </section>
+
+  <p><a href="/docs">OpenAPI docs</a></p>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const api = (path, opts) => fetch(path, opts).then(async (r) => {
+      const t = await r.text();
+      try { return { ok: r.ok, json: JSON.parse(t), raw: t }; } catch { return { ok: r.ok, json: null, raw: t }; }
+    });
+
+    $("btnUpload").onclick = async () => {
+      const f = $("pdf").files[0];
+      if (!f) { alert("Choose a PDF"); return; }
+      const fd = new FormData();
+      fd.append("file", f);
+      const res = await api("/documents/upload", { method: "POST", body: fd });
+      $("uploadOut").textContent = res.raw;
+      if (res.json && res.json.document_id) $("docId").value = res.json.document_id;
+    };
+
+    $("btnDraft").onclick = async () => {
+      const document_id = $("docId").value.trim();
+      if (!document_id) { alert("Document ID required"); return; }
+      const body = {
+        document_id,
+        task: $("task").value,
+        query: $("query").value.trim() || null,
+      };
+      const res = await api("/drafts/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      $("draftOut").textContent = res.raw;
+      if (res.json && res.json.draft_markdown) $("sysDraft").value = res.json.draft_markdown;
+    };
+
+    $("btnEdit").onclick = async () => {
+      const document_id = $("docId").value.trim();
+      if (!document_id) { alert("Document ID required"); return; }
+      const body = {
+        document_id,
+        task: $("task").value,
+        system_draft_markdown: $("sysDraft").value,
+        operator_final_markdown: $("opFinal").value,
+      };
+      const res = await api("/edits/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      $("editOut").textContent = res.raw;
+    };
+  </script>
+</body>
+</html>
