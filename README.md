@@ -82,13 +82,3 @@ The image installs Tesseract for OCR. Mount `/data` via the compose volume for p
 | POST | `/edits/feedback` | system vs operator markdown → diff summary + learned snippets (SQL + Chroma) |
 | GET | `/documents/{id}/edits` | recent edit sessions |
 
-## How to submit (per assessment PDF)
-
-1. Push this repository to GitHub.  
-2. Invite collaborators: `github.com/tsensei` and `github.com/abubakarsiddik31`.  
-3. Email `talha@ideabuilders.studio` with the repo link and a short introduction.  
-4. **Deadline:** Friday, May 15, 2026 (end of day, local time).
-
-## Evaluation / assumptions
-
-See `docs/EVALUATION.md` and `docs/ASSUMPTIONS_AND_TRADEOFFS.md`.
